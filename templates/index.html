@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <title>Laksestatistikk</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <style>
+    body { background:#f6f7f9; }
+    .card { border-radius:14px; border:0; box-shadow:0 4px 16px rgba(0,0,0,.05); }
+    .kpi .v { font-size:1.6rem; font-weight:600; }
+    .kpi .l { font-size:.8rem; color:#6c757d; text-transform:uppercase; letter-spacing:.03em; }
+    .up { color:#198754; } .down { color:#dc3545; }
+    .plot { height:360px; }
+    .weeks { display:grid; grid-template-columns:repeat(6,1fr); gap:2px 6px; font-size:.85rem; }
+    .weeks label { cursor:pointer; user-select:none; }
+    .sticky-lg { position:sticky; top:1rem; }
+    select[multiple] { min-height:220px; }
+    td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+    .loading { opacity:.45; transition:opacity .2s; }
+  </style>
+</head>
+<body>
+<div class="container-xl py-4">
+  <div class="d-flex flex-wrap align-items-baseline justify-content-between mb-3 gap-2">
+    <h1 class="h3 m-0">Laksestatistikk</h1>
+    <span class="small text-muted">Kilder: SSB tabell 03024 og 08817 · Norges Bank valutakurser</span>
+  </div>
+
+  <!-- KPI-er -->
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
+      <div class="l">Kilopris fersk, uke {{ meta.siste_uke }}/{{ meta.siste_aar }}</div>
+      <div class="v">{{ "%.2f"|format(meta.pris) }} kr</div>
+      {% if meta.pris_ifjor %}{% set e = (meta.pris / meta.pris_ifjor - 1) * 100 %}
+      <div class="small {{ 'up' if e >= 0 else 'down' }}">{{ "%+.1f"|format(e) }} % mot samme uke i fjor</div>{% endif %}
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
+      <div class="l">Kilopris fersk i EUR</div>
+      <div class="v">{% if meta.eur %}€ {{ "%.2f"|format(meta.pris / meta.eur) }}{% else %}–{% endif %}</div>
+      <div class="small text-muted">{% if meta.eur %}EURNOK {{ "%.2f"|format(meta.eur) }}{% endif %}</div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
+      <div class="l">Volum fersk, uke {{ meta.siste_uke }}</div>
+      <div class="v">{{ "{:,.0f}".format(meta.tonn).replace(",", " ") }} t</div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
+      <div class="l">Eksportverdi hittil i {{ meta.siste_aar }}</div>
+      <div class="v">{{ "%.1f"|format(meta.verdi_hittil / 1e9) }} mrd kr</div>
+      {% if meta.verdi_hittil_ifjor %}{% set e = (meta.verdi_hittil / meta.verdi_hittil_ifjor - 1) * 100 %}
+      <div class="small {{ 'up' if e >= 0 else 'down' }}">{{ "%+.1f"|format(e) }} % mot samme periode i fjor</div>{% endif %}
+    </div></div></div>
+  </div>
+
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-laks">Ukentlig lakseeksport</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-fylke">Eksport per fylke</button></li>
+  </ul>
+
+  <div class="tab-content">
+    <!-- ===== Laks ===== -->
+    <div class="tab-pane fade show active" id="tab-laks">
+      <div class="row g-3">
+        <div class="col-lg-3"><div class="card sticky-lg"><div class="card-body">
+          <form id="laksForm">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <h2 class="h6 m-0">Uker</h2>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary" data-uker="alle">Alle</button>
+                <button type="button" class="btn btn-outline-secondary" data-uker="hittil">Hittil i år</button>
+                <button type="button" class="btn btn-outline-secondary" data-uker="ingen">Ingen</button>
+              </div>
+            </div>
+            <div class="small text-muted mb-2">Ingen valgt = hele året</div>
+            <div class="weeks mb-3">
+              {% for w in range(1, 54) %}
+              <label><input class="form-check-input me-1" type="checkbox" name="uke" value="{{ w }}">{{ "%02d"|format(w) }}</label>
+              {% endfor %}
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col"><label class="form-label small mb-0">Fra år</label>
+                <input class="form-control form-control-sm" type="number" name="fra" value="{{ meta.siste_aar - 15 }}" min="{{ meta.aar_min }}" max="{{ meta.siste_aar }}"></div>
+              <div class="col"><label class="form-label small mb-0">Til år</label>
+                <input class="form-control form-control-sm" type="number" name="til" value="{{ meta.siste_aar }}" min="{{ meta.aar_min }}" max="{{ meta.siste_aar }}"></div>
+            </div>
+            <label class="form-label small mb-0">Valuta</label>
+            <select class="form-select form-select-sm mb-3" name="valuta">
+              <option>NOK</option><option>EUR</option><option>USD</option>
+            </select>
+            <a id="laksCsv" class="btn btn-outline-primary btn-sm w-100" href="#">Last ned CSV</a>
+          </form>
+        </div></div></div>
+
+        <div class="col-lg-9" id="laksOut">
+          <div class="row g-3">
+            <div class="col-xl-6"><div class="card"><div class="card-body">
+              <h2 class="h6">Volumvektet kilopris</h2><div id="pPris" class="plot"></div></div></div></div>
+            <div class="col-xl-6"><div class="card"><div class="card-body">
+              <h2 class="h6">Volum (tonn)</h2><div id="pTonn" class="plot"></div></div></div></div>
+            <div class="col-xl-6"><div class="card"><div class="card-body">
+              <h2 class="h6">Eksportverdi</h2><div id="pVerdi" class="plot"></div></div></div></div>
+            <div class="col-xl-6"><div class="card"><div class="card-body">
+              <h2 class="h6">Sesongprofil – kilopris fersk per uke, siste 5 år</h2><div id="pSesong" class="plot"></div></div></div></div>
+            <div class="col-12"><div class="card"><div class="card-body">
+              <h2 class="h6">Tabell per år</h2>
+              <div class="table-responsive"><table class="table table-sm table-striped" id="laksTabell"></table></div>
+            </div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Fylke ===== -->
+    <div class="tab-pane fade" id="tab-fylke">
+      <div class="row g-3">
+        <div class="col-lg-3"><div class="card sticky-lg"><div class="card-body">
+          <form id="fylkeForm">
+            <label class="form-label small mb-0">Regioner <span class="text-muted">(Ctrl+klikk for flere)</span></label>
+            <select class="form-select form-select-sm mb-3" name="regioner" multiple>
+              {% for r in regioner %}<option {% if r in ['Vestland', 'Møre og Romsdal', 'Nordland - Nordlánnda', 'Trøndelag - Trööndelage', 'Rogaland'] %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+            <label class="form-label small mb-0">Varegrupper</label>
+            <select class="form-select form-select-sm mb-3" name="varegrupper" multiple style="min-height:160px">
+              {% for v in varegrupper %}<option {% if v == 'Fisk' %}selected{% endif %}>{{ v }}</option>{% endfor %}
+            </select>
+            <div class="row g-2 mb-3">
+              <div class="col"><label class="form-label small mb-0">Fra år</label>
+                <input class="form-control form-control-sm" type="number" name="fra" value="2010" min="{{ meta.fylke_aar_min }}" max="{{ meta.fylke_aar_max }}"></div>
+              <div class="col"><label class="form-label small mb-0">Til år</label>
+                <input class="form-control form-control-sm" type="number" name="til" value="{{ meta.fylke_aar_max }}" min="{{ meta.fylke_aar_min }}" max="{{ meta.fylke_aar_max }}"></div>
+            </div>
+            <label class="form-label small mb-0">Periode</label>
+            <select class="form-select form-select-sm mb-1" name="periode">
+              <option value="hittil">Hittil i år (jan–{{ ['jan','feb','mar','apr','mai','jun','jul','aug','sep','okt','nov','des'][meta.fylke_siste_mnd - 1] }})</option>
+              <option value="aar">Hele året</option>
+            </select>
+            <div class="small text-muted mb-3">«Hittil i år» gjør {{ meta.fylke_aar_max }} sammenlignbart med tidligere år.</div>
+            <a id="fylkeCsv" class="btn btn-outline-primary btn-sm w-100" href="#">Last ned CSV</a>
+          </form>
+          <div class="small text-muted mt-3">Gamle fylker er slått sammen med dagens fylker. Regionene fra 2020–2023 (Viken, Vestfold og Telemark, Troms og Finnmark) kan ikke deles opp og vises for seg.</div>
+        </div></div></div>
+
+        <div class="col-lg-9" id="fylkeOut">
+          <div class="row g-3">
+            <div class="col-12"><div class="card"><div class="card-body">
+              <h2 class="h6">Fastlandseksport (mill. kr) per år</h2><div id="pFylke" class="plot" style="height:440px"></div></div></div></div>
+            <div class="col-12"><div class="card"><div class="card-body">
+              <h2 class="h6">Tabell</h2>
+              <div class="table-responsive"><table class="table table-sm table-striped" id="fylkeTabell"></table></div>
+            </div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const SISTE_UKE = {{ meta.siste_uke }};
+const nf = (d) => new Intl.NumberFormat('nb-NO', {maximumFractionDigits: d});
+const fmt = (v, d = 0) => v == null ? '–' : nf(d).format(v);
+const layout = (ytitle, extra = {}) => Object.assign({
+  template: 'plotly_white', margin: {l: 60, r: 10, t: 10, b: 40},
+  xaxis: {title: 'År'}, yaxis: {title: ytitle, separatethousands: true, rangemode: 'tozero'},
+  legend: {orientation: 'h', y: -0.2}, separators: ', ', hovermode: 'x unified',
+}, extra);
+const cfg = {displayModeBar: false, responsive: true};
+
+function params(form) {
+  const fd = new FormData(form), p = new URLSearchParams();
+  for (const k of ['fra', 'til', 'valuta', 'periode']) if (fd.has(k)) p.set(k, fd.get(k));
+  if (fd.has('uke')) p.set('uker', fd.getAll('uke').join(','));
+  for (const k of ['regioner', 'varegrupper']) if (form[k]) p.set(k, [...form[k].selectedOptions].map(o => o.value).join('|'));
+  return p.toString();
+}
+
+function table(el, cols, rows) {
+  el.innerHTML = '<thead><tr>' + cols.map(c => `<th class="${c.num ? 'num' : ''}">${c.t}</th>`).join('') + '</tr></thead><tbody>' +
+    rows.map(r => '<tr>' + cols.map(c => `<td class="${c.num ? 'num' : ''}">${c.num ? fmt(r[c.k], c.d) : r[c.k]}</td>`).join('') + '</tr>').join('') + '</tbody>';
+}
+
+// ---------- Laks ----------
+const laksForm = document.getElementById('laksForm');
+async function oppdaterLaks() {
+  const q = params(laksForm), out = document.getElementById('laksOut');
+  document.getElementById('laksCsv').href = '/laks.csv?' + q;
+  out.classList.add('loading');
+  const d = await (await fetch('/api/laks?' + q)).json();
+  out.classList.remove('loading');
+  const a = d.aggregat, x = a.map(r => r.aar), v = d.valuta;
+  Plotly.react('pPris', [
+    {x, y: a.map(r => r.fersk_pris), name: 'Fersk', mode: 'lines+markers'},
+    {x, y: a.map(r => r.frosen_pris), name: 'Frosen', mode: 'lines+markers'},
+  ], layout(`${v}/kg`), cfg);
+  Plotly.react('pTonn', [
+    {x, y: a.map(r => r.fersk_tonn), name: 'Fersk', type: 'bar'},
+    {x, y: a.map(r => r.frosen_tonn), name: 'Frosen', type: 'bar'},
+  ], layout('Tonn', {barmode: 'stack'}), cfg);
+  Plotly.react('pVerdi', [
+    {x, y: a.map(r => r.fersk_verdi / 1e9), name: 'Fersk', type: 'bar'},
+    {x, y: a.map(r => r.frosen_verdi / 1e9), name: 'Frosen', type: 'bar'},
+  ], layout(`Mrd ${v}`, {barmode: 'stack'}), cfg);
+  const aarListe = Object.keys(d.sesong);
+  Plotly.react('pSesong', aarListe.map((aar, i) => ({
+    x: d.sesong[aar].uke, y: d.sesong[aar].pris, name: aar, mode: 'lines',
+    line: {width: i === aarListe.length - 1 ? 3.5 : 1.5},
+  })), layout(`${v}/kg`, {xaxis: {title: 'Uke'}, yaxis: {title: `${v}/kg`}}), cfg);
+  table(document.getElementById('laksTabell'), [
+    {t: 'År', k: 'aar'}, {t: 'Uker', k: 'uker', num: 1},
+    {t: 'Fersk tonn', k: 'fersk_tonn', num: 1}, {t: `Fersk ${v}/kg`, k: 'fersk_pris', num: 1, d: 2},
+    {t: 'Frosen tonn', k: 'frosen_tonn', num: 1}, {t: `Frosen ${v}/kg`, k: 'frosen_pris', num: 1, d: 2},
+    {t: `Verdi fersk (mill. ${v})`, k: 'fersk_verdi_m', num: 1}, {t: `Verdi frosen (mill. ${v})`, k: 'frosen_verdi_m', num: 1},
+  ], a.map(r => ({...r, fersk_verdi_m: r.fersk_verdi / 1e6, frosen_verdi_m: r.frosen_verdi / 1e6})).reverse());
+}
+laksForm.addEventListener('change', oppdaterLaks);
+laksForm.querySelectorAll('[data-uker]').forEach(b => b.addEventListener('click', () => {
+  laksForm.querySelectorAll('input[name=uke]').forEach(c => {
+    c.checked = b.dataset.uker === 'alle' || (b.dataset.uker === 'hittil' && +c.value <= SISTE_UKE);
+  });
+  oppdaterLaks();
+}));
+
+// ---------- Fylke ----------
+const fylkeForm = document.getElementById('fylkeForm');
+async function oppdaterFylke() {
+  const q = params(fylkeForm), out = document.getElementById('fylkeOut');
+  document.getElementById('fylkeCsv').href = '/fylke.csv?' + q;
+  out.classList.add('loading');
+  const d = await (await fetch('/api/fylke?' + q)).json();
+  out.classList.remove('loading');
+  const flereVg = new Set(d.rader.map(r => r.varegruppe)).size > 1;
+  const serier = {};
+  for (const r of d.rader) {
+    const navn = flereVg ? `${r.region} – ${r.varegruppe}` : r.region;
+    (serier[navn] ??= {x: [], y: [], name: navn, type: 'bar'}).x.push(r.aar);
+    serier[navn].y.push(r.mill_kr);
+  }
+  Plotly.react('pFylke', Object.values(serier), layout('Mill. kr', {barmode: 'stack'}), cfg);
+  table(document.getElementById('fylkeTabell'), [
+    {t: 'År', k: 'aar'}, {t: 'Region', k: 'region'}, {t: 'Varegruppe', k: 'varegruppe'}, {t: 'Mill. kr', k: 'mill_kr', num: 1},
+  ], [...d.rader].sort((a, b) => b.aar - a.aar || b.mill_kr - a.mill_kr));
+}
+fylkeForm.addEventListener('change', oppdaterFylke);
+document.querySelector('[data-bs-target="#tab-fylke"]').addEventListener('shown.bs.tab', () => {
+  oppdaterFylke(); window.dispatchEvent(new Event('resize'));
+}, {once: true});
+
+oppdaterLaks();
+</script>
+</body>
+</html>
